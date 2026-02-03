@@ -37,6 +37,14 @@ UNKNOWN = 0
 done_init = False
 package_contents = {}
 bundle_offsets = {}
+file_handles = {}
+
+# optimization stuff
+START_OFFSET = 1
+BUNDLE_INDEX = 2
+ORIGINAL_ARCHIVE_OFFSET = 0
+SIZE = 0
+ENTRIES = 1
 
 game_data_folder = ""
 
@@ -48,6 +56,23 @@ def slim_init(file_path: str):
 
 def is_slim_version():
     return not os.path.exists(os.path.join(game_data_folder, "9ba626afa44a3aa3"))
+    
+def get_file_handle(file_path):
+    file_path = os.path.normpath(file_path)
+    if file_path in file_handles:
+        f = file_handles[file_path]
+        f.seek(0)
+        return f
+    else:
+        f = open(file_path, 'rb')
+        file_handles[file_path] = f
+        return f
+        
+def close_file_handles():
+    global file_handles
+    for f in file_handles.values():
+        f.close()
+    file_handles = {}
 
 def decompress_dsar(file_path):
 
@@ -55,19 +80,13 @@ def decompress_dsar(file_path):
 
     bundle = open(file_path, 'rb')
 
-    bundle.seek(8)
-    num_chunks = read_int(bundle) # num data chunks
+    num_chunks = num_chunks = struct.unpack("<8xI20x", bundle.read(0x20))[0] # num data chunks
     data = []
     file_count = 0
+    chunk_data = struct.unpack(f"<{'QQIIBB6x'*num_chunks}", bundle.read(0x20*num_chunks))
 
     for i in range(num_chunks):
-        bundle.seek(0x20 + i * 0x20)
-        uncompressed_offset = read_long(bundle)
-        compressed_offset =   read_long(bundle)
-        uncompressed_size =   read_int(bundle)
-        compressed_size =     read_int(bundle)
-        compression_type =    read_char(bundle)
-        chunk_type =          read_char(bundle)
+        uncompressed_offset, compressed_offset, uncompressed_size, compressed_size, compression_type, chunk_type = chunk_data[6*i:6*(i+1)]
 
         bundle.seek(compressed_offset)
 
@@ -76,7 +95,7 @@ def decompress_dsar(file_path):
         if compression_type == COMPRESSED:
             temp_data = block.decompress(temp_data, uncompressed_size=uncompressed_size)
         data.append(temp_data)
-
+        
     bundle.close()
 
     return b"".join(data)
@@ -87,13 +106,11 @@ def get_resource_from_bundle(bundle_path: str, resource_file_offset: int):
     # handles resources split into multiple compressed chunks to return complete resource
 
     bundle = open(bundle_path, 'rb')
-    bundle.seek(8)
-    num_chunks = read_int(bundle) # num data chunks
+    num_chunks = struct.unpack("<8xI", bundle.read(12))[0] # num data chunks
     data = []
     
     global bundle_offsets
     chunk_num = bundle_offsets[os.path.basename(bundle_path)][resource_file_offset]
-    
 
     while True:
         bundle.seek(0x20 + 0x20 * chunk_num)
@@ -115,9 +132,20 @@ def get_resource_from_bundle(bundle_path: str, resource_file_offset: int):
             return b"".join(data)
             
         chunk_num += 1
-
+        
     bundle.close()
-    
+
+class Package:
+
+    def __init__(self):
+        self.size = 0
+        self.entries = []
+
+class BundleEntry:
+
+    def __init__(self):
+        self.start_offset = self.bundle_index = self.original_archive_offset = 0
+        
 def get_resource_from_package(package_name: str, resource_file_offset: int, resource_size: int = 0):
     
     global package_contents
@@ -148,8 +176,11 @@ def get_resource_from_package(package_name: str, resource_file_offset: int, reso
             
         # how to convert file offset in package into file offset in bundle?
         
-        package_data = reconstruct_package_from_bundles(package_name)
-        return package_data[resource_file_offset:resource_file_offset+resource_size]
+        for entry in reversed(package[ENTRIES]):
+            if entry[ORIGINAL_ARCHIVE_OFFSET] <= resource_file_offset:
+                return get_resource_from_bundle(os.path.join(game_data_folder, f"bundles.{entry[BUNDLE_INDEX]:02d}.nxa"), entry[START_OFFSET] + (resource_file_offset - entry[ORIGINAL_ARCHIVE_OFFSET]))
+
+        return bytearray()
 
     elif package_type == DSAR:
 
@@ -170,23 +201,10 @@ def get_resource_from_package(package_name: str, resource_file_offset: int, reso
 
     return bytearray()
 
-class Package:
-
-    def __init__(self):
-        self.size = 0
-        self.name = ""
-        self.entries = []
-
-class BundleEntry:
-
-    def __init__(self):
-        self.start_offset = self.bundle_index = self.original_archive_offset = 0
-
 def init_bundle_mapping():
     bundle_contents = decompress_dsar(os.path.join(game_data_folder, "bundles.nxa"))
 
-    num_packages = to_int(bundle_contents[0x10:0x14])
-    num_bundles = to_int(bundle_contents[0x0C:0x10])
+    num_bundles, num_packages = struct.unpack_from("<II", bundle_contents, 0x0C)
 
     bundle_location = 0
     bundles = [[] for _ in range(num_bundles)]
@@ -197,46 +215,35 @@ def init_bundle_mapping():
     bundle_offsets = {}
     
     # get toc for each bundle:
+    with os.scandir(game_data_folder) as it:
+        for entry in it:
+            filename = entry.name
+            if entry.is_file() and (".patch" not in filename) and (os.path.splitext(filename)[1] in ["", ".stream", ".nxa", ".gpu_resources"]):
+                bundle_offsets[filename] = {}
+                with open(os.path.join(game_data_folder, filename), 'rb') as bundle:
+                    num_chunks = struct.unpack("<8xI20x", bundle.read(0x20))[0] # num data chunks
+                    uncompressed_offsets = struct.unpack(f"<{'Q24x'*num_chunks}", bundle.read(0x20*num_chunks))
+                    for j, offset in enumerate(uncompressed_offsets):
+                        bundle_offsets[filename][offset] = j
+    '''
     for filename in os.listdir(game_data_folder):
         if (not os.path.isdir(os.path.join(game_data_folder, filename))) and (".patch" not in filename) and (os.path.splitext(filename)[1] in ["", ".stream", ".nxa", ".gpu_resources"]):
-            bundle_name = os.path.basename(filename)
-            bundle_offsets[bundle_name] = {}
-            with open(os.path.join(game_data_folder, bundle_name), 'rb') as bundle:
-                bundle.seek(8)
-                num_chunks = read_int(bundle) # num data chunks
-                bundle.seek(0x20)
+            bundle_offsets[filename] = {}
+            with open(os.path.join(game_data_folder, filename), 'rb') as bundle:
+                num_chunks = struct.unpack("<8xI20x", bundle.read(0x20))[0] # num data chunks
                 uncompressed_offsets = struct.unpack(f"<{'Q24x'*num_chunks}", bundle.read(0x20*num_chunks))
                 for j, offset in enumerate(uncompressed_offsets):
-                    bundle_offsets[bundle_name][offset] = j
-            
-
+                    bundle_offsets[filename][offset] = j
+    '''
     # check name of each package to find the right one
+    package_info = struct.unpack_from(f"<{'QIII4x'*num_packages}", bundle_contents, 0x18)
     for n in range(num_packages):
-        bundle_location = 0x18 + n * 0x18
-        bundle_size = to_int(bundle_contents[bundle_location:bundle_location+8])
-        name_offset = to_int(bundle_contents[bundle_location+8:bundle_location+12])
-        i = 0
-        while bundle_contents[name_offset+i] != 0:
-            i += 1
-        name = bundle_contents[name_offset:name_offset+i].decode()
+        bundle_size, name_offset, items_count, items_offset = package_info[n*4:(n+1)*4]
+        string_end = bundle_contents.find(b"\x00", name_offset)
+        name = bundle_contents[name_offset:string_end].decode()
         # parse all BundleEntries for each package
-        items_count = to_int(bundle_contents[bundle_location+12:bundle_location+16])
-        items_offset = to_int(bundle_contents[bundle_location+16:bundle_location+20])
-        for i in range(items_count):
-            bundle_entry = BundleEntry()
-            original_archive_offset = to_int(bundle_contents[items_offset + 0x10*i:items_offset + 0x10*i + 8])
-            uncompressed_bundle_offset = to_int(bundle_contents[items_offset + 0x10*i + 8:items_offset + 0x10*i + 12])
-            bundle_index = (bundle_contents[items_offset + 0x10*i + 0x0F])
-            bundle_entry.bundle_index = bundle_index
-            bundle_entry.start_offset = uncompressed_bundle_offset
-            bundle_entry.original_archive_offset = original_archive_offset
-            try:
-                package_contents[name].entries.append(bundle_entry)
-            except KeyError:
-                package_contents[name] = Package()
-                package_contents[name].name = name
-                package_contents[name].size = bundle_size
-                package_contents[name].entries = [bundle_entry]
+        item_data = struct.unpack_from(f"<{'QI3xB'*items_count}", bundle_contents, items_offset)
+        package_contents[name] = (bundle_size, [item_data[i*3:(i+1)*3] for i in range(items_count)])
 
 def get_resources_from_bundle(bundle_path: str, start_offset: int, size: int):
 
@@ -281,7 +288,7 @@ def get_package_toc(package_name: str):
             # print(f"Unable to get package {package_name}")
             return bytearray()
 
-        return get_resource_from_bundle(os.path.join(game_data_folder, f"bundles.{package.entries[0].bundle_index:02d}.nxa"), package.entries[0].start_offset)
+        return get_resource_from_bundle(os.path.join(game_data_folder, f"bundles.{package[ENTRIES][0][BUNDLE_INDEX]:02d}.nxa"), package[ENTRIES][0][START_OFFSET])
 
     elif package_type == DSAR:
 
@@ -349,6 +356,8 @@ def load_package(package_path: str):
         if os.path.exists(package_path+".stream"):
             with open(package_path+".stream", 'rb') as f:
                 stream_data = f.read()
+                
+    close_file_handles()
 
     return toc_data, gpu_data, stream_data
 
@@ -363,18 +372,16 @@ def reconstruct_package_from_bundles(package_name: str):
         package = package_contents[package_name]
     except KeyError:
         return bytearray()
-
-    package_data = bytearray(package.size)
-    size = 0
-    for i, item in enumerate(package.entries):
+    data = []
+    package_data = bytearray(package[SIZE])
+    for i, item in enumerate(package[ENTRIES]):
         try:
-            item_size = package.entries[i+1].original_archive_offset - item.original_archive_offset
+            item_size = package[ENTRIES][i+1][ORIGINAL_ARCHIVE_OFFSET] - item[ORIGINAL_ARCHIVE_OFFSET]
         except IndexError:
-            item_size = package.size - item.original_archive_offset
-        size += item_size
-        resources = get_resources_from_bundle(os.path.join(game_data_folder, f"bundles.{item.bundle_index:02d}.nxa"), item.start_offset, item_size)
+            item_size = package[SIZE] - item[ORIGINAL_ARCHIVE_OFFSET]
+        resources = get_resources_from_bundle(os.path.join(game_data_folder, f"bundles.{item[BUNDLE_INDEX]:02d}.nxa"), item[START_OFFSET], item_size)
         combined_data = b"".join(resources)
-        package_data[item.original_archive_offset:item.original_archive_offset+len(combined_data)] = combined_data
+        package_data[item[ORIGINAL_ARCHIVE_OFFSET]:item[ORIGINAL_ARCHIVE_OFFSET]+len(combined_data)] = combined_data
     return package_data
 
 if __name__ == "__main__":
@@ -402,3 +409,4 @@ if __name__ == "__main__":
     if content:
         with open(os.path.join(output_folder, f"{package_name}.stream"), 'wb') as f:
             f.write(content)
+    close_file_handles()
