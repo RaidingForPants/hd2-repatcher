@@ -211,6 +211,8 @@ def load_resources_from_file(file_path: str):
     global game_resource_mapping
     
     toc_data = get_package_toc(file_path)
+    if len(toc_data) == 0:
+        return
     tocFile = MemoryStream(toc_data)
     magic, numTypes, numFiles, unknown, unk4Data = struct.unpack("<IIII56s", tocFile.read(72))
     tocFile.seek(tocFile.tell() + 32 * numTypes)
