@@ -227,7 +227,8 @@ def load_resources_from_file(file_path: str):
             tocHeader.from_bytes(tocFile.read(80))
         except:
             print(file_path)
-        game_resource_mapping[tocHeader.file_id] = (os.path.basename(file_path), tocHeader.toc_data_offset, tocHeader.toc_data_size)
+        if tocHeader.type_id == 16187218042980615487:
+            game_resource_mapping[tocHeader.file_id] = (os.path.basename(file_path), tocHeader.toc_data_offset, tocHeader.toc_data_size)
     
 def load_game_resources():
     global game_resource_mapping
@@ -245,7 +246,8 @@ def load_game_resources():
             futures.append(executor.submit(load_resources_from_file, os.path.join(game_resource_path, name)))
         for index, future in enumerate(futures):
             if future.result():
-                self.SearchArchives.append(tocs[index])
+                pass
+                #self.SearchArchives.append(tocs[index])
         executor.shutdown()
     else:
         futures = []
@@ -257,7 +259,8 @@ def load_game_resources():
                     futures.append(executor.submit(load_resources_from_file, os.path.join(root, name)))
         for index, future in enumerate(futures):
             if future.result():
-                self.SearchArchives.append(tocs[index])
+                pass
+                #self.SearchArchives.append(tocs[index])
         executor.shutdown()
 
 def update_patch_file(file_path: str):
@@ -290,6 +293,9 @@ def update_patch_file(file_path: str):
             group_size = joint_list_offset - lod_group_offset
             stream.seek(header_data.toc_data_offset + size_offset + lod_group_offset)
             size_difference = lod_group_size - group_size
+            print(f"group size: {group_size}")
+            print(f"lod group size: {lod_group_size}")
+            print(f"size difference: {size_difference}")
             if size_difference > 0:
                 stream.insert(size_difference)
             else:
@@ -300,6 +306,7 @@ def update_patch_file(file_path: str):
                 offset = stream.uint32_read()
                 if offset != 0 and offset > lod_group_offset:
                     stream.advance(-4)
+                    print(offset)
                     stream.write((offset + size_difference).to_bytes(4, "little"))
             stream.seek(header_data.toc_data_offset + size_offset + lod_group_offset)
             stream.write(lod_group_data)
