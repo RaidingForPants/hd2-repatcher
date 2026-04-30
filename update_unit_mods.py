@@ -209,8 +209,10 @@ def get_data_from_original_file(unit_id: int):
     
 def load_resources_from_file(file_path: str):
     global game_resource_mapping
-    
-    toc_data = get_package_toc(file_path)
+    try:
+        toc_data = get_package_toc(file_path)
+    except KeyError as e:
+        return
     if len(toc_data) == 0:
         return
     tocFile = MemoryStream(toc_data)
@@ -266,7 +268,15 @@ def load_game_resources():
 def update_patch_file(file_path: str):
     tocFile = open(file_path, 'r+b')
     magic, numTypes, numFiles, unknown, unk4Data = struct.unpack("<IIII56s", tocFile.read(72))
-    tocFile.seek(tocFile.tell() + 32 * numTypes)
+    for _ in range(numTypes):
+        tocFile.seek(tocFile.tell()+8)
+        resource_type, num_resources = struct.unpack("<QQ", tocFile.read(16))
+        type_offset = tocFile.tell()-8
+        tocFile.seek(tocFile.tell()+8)
+        if resource_type == 16187218042980615487:
+            break
+    if resource_type != 16187218042980615487: # no units in this patch
+        return
     tocStart = tocFile.tell()
     size_offset = 0
     tocFile.seek(0)
@@ -276,8 +286,28 @@ def update_patch_file(file_path: str):
         tocFile.seek(tocStart + n*80)
         tocHeader = TocHeader()
         tocHeader.from_bytes(tocFile.read(80))
-        headers.append((tocHeader, tocStart+n*80))
+        headers.append([tocHeader, tocStart+n*80])
     headers.sort(key=lambda h: h[0].toc_data_offset)
+    stream.seek(tocStart)
+    header_offset_adjustment = 0
+    for header in headers:
+        header[1] += header_offset_adjustment
+        header_data, header_offset = header
+        if header_data.file_id not in game_resource_mapping:
+            stream.seek(header_offset)
+            stream.delete(80)
+            numFiles -= 1
+            num_resources -= 1
+            header_offset_adjustment -= 80
+            size_offset -= 80
+            stream.seek(header_data.toc_data_offset + size_offset)
+            stream.delete(header_data.toc_data_size)
+            size_offset -= header_data.toc_data_size
+    stream.seek(8)
+    stream.write(struct.pack("<I", numFiles))
+    stream.seek(type_offset)
+    stream.write(struct.pack("<Q", num_resources))
+    headers = [header for header in headers if header[0].file_id in game_resource_mapping]            
     for header in headers:
         header_data, header_offset = header
         stream.seek(header_offset + 16)
@@ -286,6 +316,7 @@ def update_patch_file(file_path: str):
             stream.seek(header_data.toc_data_offset + size_offset) # start of unit data in patch
             # do the updating
             version, lod_group_data, lod_group_size = get_data_from_original_file(header_data.file_id)
+
             unit_start = stream.tell()
             
             stream.seek(unit_start + 0x2C)
