@@ -277,7 +277,7 @@ def update_patch_file(file_path: str):
             break
     if resource_type != 16187218042980615487: # no units in this patch
         return
-    tocStart = tocFile.tell()
+    tocStart = 72 + 32 * numTypes
     size_offset = 0
     tocFile.seek(0)
     stream = MemoryStream(tocFile.read())
@@ -287,32 +287,33 @@ def update_patch_file(file_path: str):
         tocHeader = TocHeader()
         tocHeader.from_bytes(tocFile.read(80))
         headers.append([tocHeader, tocStart+n*80])
-    headers.sort(key=lambda h: h[0].toc_data_offset)
     stream.seek(tocStart)
     header_offset_adjustment = 0
+    temp_headers = []
     for header in headers:
         header[1] += header_offset_adjustment
         header_data, header_offset = header
-        if header_data.file_id not in game_resource_mapping:
+        if header_data.file_id not in game_resource_mapping and header_data.type_id == 16187218042980615487:
             stream.seek(header_offset)
             stream.delete(80)
             numFiles -= 1
             num_resources -= 1
             header_offset_adjustment -= 80
-            size_offset -= 80
-            stream.seek(header_data.toc_data_offset + size_offset)
-            stream.delete(header_data.toc_data_size)
-            size_offset -= header_data.toc_data_size
+        else:
+            temp_headers.append(header)
+    headers = temp_headers
+    for header in headers:
+        header[0].toc_data_offset += header_offset_adjustment
+    headers.sort(key=lambda h: h[0].toc_data_offset)
     stream.seek(8)
     stream.write(struct.pack("<I", numFiles))
     stream.seek(type_offset)
     stream.write(struct.pack("<Q", num_resources))
-    headers = [header for header in headers if header[0].file_id in game_resource_mapping]            
     for header in headers:
         header_data, header_offset = header
         stream.seek(header_offset + 16)
         stream.write(struct.pack("<Q", header_data.toc_data_offset + size_offset))
-        if header_data.type_id == 16187218042980615487: # unit ID
+        if header_data.type_id == 16187218042980615487 and header_data.file_id in game_resource_mapping: # unit ID
             stream.seek(header_data.toc_data_offset + size_offset) # start of unit data in patch
             # do the updating
             version, lod_group_data, lod_group_size = get_data_from_original_file(header_data.file_id)
