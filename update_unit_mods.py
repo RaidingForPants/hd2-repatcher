@@ -286,6 +286,28 @@ def update_patch_file(file_path: str):
             stream.seek(header_data.toc_data_offset + size_offset) # start of unit data in patch
             # do the updating
             version, lod_group_data, lod_group_size = get_data_from_original_file(header_data.file_id)
+            unit_start = stream.tell()
+            
+            stream.seek(unit_start + 0x2C)
+            v = stream.uint32_read()
+            if (v < 0xA4CD36):
+                stream.seek(unit_start + 0x5C)
+                layout_list_offset = stream.uint32_read()
+                stream.seek(unit_start + layout_list_offset)
+                num_layouts = stream.uint32_read()
+                layout_offsets = [stream.uint32_read() for _ in range(num_layouts)]
+                for layout_offset in layout_offsets:
+                    stream.seek(unit_start + layout_list_offset + layout_offset)
+                    stream.advance(8)
+                    for _ in range(16):
+                        item_type = stream.uint32_read()
+                        item_format = stream.uint32_read()
+                        if item_format > 16:
+                            stream.advance(-4)
+                            stream.write(struct.pack("<I", item_format+4))
+                        stream.advance(12)
+            stream.seek(unit_start)
+            
             stream.advance(0x2C)
             stream.write(version)
             lod_group_offset = stream.uint32_read()
@@ -293,9 +315,6 @@ def update_patch_file(file_path: str):
             group_size = joint_list_offset - lod_group_offset
             stream.seek(header_data.toc_data_offset + size_offset + lod_group_offset)
             size_difference = lod_group_size - group_size
-            print(f"group size: {group_size}")
-            print(f"lod group size: {lod_group_size}")
-            print(f"size difference: {size_difference}")
             if size_difference > 0:
                 stream.insert(size_difference)
             else:
@@ -306,7 +325,6 @@ def update_patch_file(file_path: str):
                 offset = stream.uint32_read()
                 if offset != 0 and offset > lod_group_offset:
                     stream.advance(-4)
-                    print(offset)
                     stream.write((offset + size_difference).to_bytes(4, "little"))
             stream.seek(header_data.toc_data_offset + size_offset + lod_group_offset)
             stream.write(lod_group_data)
