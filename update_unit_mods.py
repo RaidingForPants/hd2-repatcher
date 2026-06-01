@@ -268,6 +268,7 @@ def load_game_resources():
 def update_patch_file(file_path: str):
     tocFile = open(file_path, 'r+b')
     magic, numTypes, numFiles, unknown, unk4Data = struct.unpack("<IIII56s", tocFile.read(72))
+    resource_type = 0
     for _ in range(numTypes):
         tocFile.seek(tocFile.tell()+8)
         resource_type, num_resources = struct.unpack("<QQ", tocFile.read(16))
