@@ -8,12 +8,16 @@ from tkinter import messagebox
 from pathlib import Path
 from slim import slim_init, is_slim_version, load_package, get_package_toc, get_resource_from_bundle, get_resource_from_package
 
-root = tk.Tk()
-root.withdraw()
-
 game_resource_mapping = {}
 game_resource_path = ""
 directory = ""
+
+root = tk.Tk()
+root.withdraw()
+
+UPDATE_SUCCESS = 0
+NO_UNIT_FILES = 1
+CORRUPTED_FILE = 2
 
 print("fixing unit mods...")
 
@@ -249,7 +253,6 @@ def load_game_resources():
         for index, future in enumerate(futures):
             if future.result():
                 pass
-                #self.SearchArchives.append(tocs[index])
         executor.shutdown()
     else:
         futures = []
@@ -262,22 +265,28 @@ def load_game_resources():
         for index, future in enumerate(futures):
             if future.result():
                 pass
-                #self.SearchArchives.append(tocs[index])
         executor.shutdown()
-
+        
 def update_patch_file(file_path: str):
+    file_size = os.path.getsize(file_path)
+    total_resources = 0
     tocFile = open(file_path, 'r+b')
     magic, numTypes, numFiles, unknown, unk4Data = struct.unpack("<IIII56s", tocFile.read(72))
     resource_type = 0
     for _ in range(numTypes):
         tocFile.seek(tocFile.tell()+8)
         resource_type, num_resources = struct.unpack("<QQ", tocFile.read(16))
+        total_resources += num_resources
         type_offset = tocFile.tell()-8
         tocFile.seek(tocFile.tell()+8)
+        if resource_type < 2**32:
+            return (CORRUPTED_FILE, file_path)
         if resource_type == 16187218042980615487:
             break
     if resource_type != 16187218042980615487: # no units in this patch
-        return
+        return (NO_UNIT_FILES, file_path)
+    if total_resources < numFiles:
+        return (CORRUPTED_FILE, file_path)
     tocStart = 72 + 32 * numTypes
     size_offset = 0
     tocFile.seek(0)
@@ -287,6 +296,8 @@ def update_patch_file(file_path: str):
         tocFile.seek(tocStart + n*80)
         tocHeader = TocHeader()
         tocHeader.from_bytes(tocFile.read(80))
+        if tocHeader.toc_data_offset > file_size:
+            return (CORRUPTED_FILE, file_path)
         headers.append([tocHeader, tocStart+n*80])
     stream.seek(tocStart)
     header_offset_adjustment = 0
@@ -365,11 +376,14 @@ def update_patch_file(file_path: str):
     tocFile.seek(0)
     tocFile.write(stream.data)
     tocFile.close()
-
+    return (UPDATE_SUCCESS, file_path)
+    
 def update_all():
     futures = []
     executor = concurrent.futures.ThreadPoolExecutor()
     patches = []
+    no_units = []
+    corrupted_files = []
     for root, dirs, files in os.walk(directory):
         for file in files:
             if "patch" in os.path.splitext(file)[1]:
@@ -378,14 +392,26 @@ def update_all():
         messagebox.showwarning(message="No patch files found in folder!")
         return
     else:
-        messagebox.showinfo(message=f"Updating {len(patches)} patch files...")
+        messagebox.showinfo(message=f"Checking {len(patches)} patch files...")
     for patch in patches:
         futures.append(executor.submit(update_patch_file, patch))
     for index, future in enumerate(futures):
-        if future.result():
-            pass
+        result = future.result()
+        if result[0] == CORRUPTED_FILE:
+            corrupted_files.append(result[1])
+        if result[0] == NO_UNIT_FILES:
+            no_units.append(result[1])
     executor.shutdown()
-    messagebox.showinfo(message=f"Update Complete!")
+    patch_files_updated = len(patches) - len(no_units) - len(corrupted_files)
+    m = f"Update Complete!\nUpdated {patch_files_updated} patch file(s) that contained unit resources."
+    if len(no_units) > 0:
+        m += f"\n{len(no_units)} patch file(s) did not contain any unit resources and were skipped."
+    messagebox.showinfo(message=m)
+    if len(corrupted_files) > 0:
+        m = f"Found {len(corrupted_files)} corrupted patch file(s)!"
+        for name in corrupted_files:
+            m += f"\n{os.path.normpath(name)}"
+        messagebox.showerror(message=m)
     
 while True:
     
