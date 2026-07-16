@@ -3,7 +3,7 @@ from pathlib import Path
 from platformdirs import user_config_dir
 
 APP_NAME = "hd2-repatcher"
-APP_AUTHOR = "Martes"
+APP_AUTHOR = "HD2Community"
 
 
 def _settings_path() -> Path:
