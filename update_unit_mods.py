@@ -521,7 +521,19 @@ def parse_args():
                          help="folder(s) containing patch files to update")
     return parser.parse_args()
 
+def setup_console_io():
+    '''
+    The windowed build has no console, so sys.stdout/stderr are None; guard
+    stray print() calls from crashing it. The console build already has real
+    stdio and this is a no-op there.
+    '''
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+
 def main():
+    setup_console_io()
     args = parse_args()
 
     game_path = None
