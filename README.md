@@ -105,7 +105,7 @@ set it.
 ## Settings
 
 The game data path chosen via the GUI or `-g`/`--game` is cached in
-`%LOCALAPPDATA%\HD2Community\hd2-repatcher\settings.json`. Delete that file to
+`%LOCALAPPDATA%\hd2-repatcher\settings.json`. Delete that file to
 reset it, or pass `-g`/`--game` again to overwrite it.
 
 ## Testing

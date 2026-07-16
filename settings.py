@@ -3,11 +3,9 @@ from pathlib import Path
 from platformdirs import user_config_dir
 
 APP_NAME = "hd2-repatcher"
-APP_AUTHOR = "HD2Community"
-
 
 def _settings_path() -> Path:
-    return Path(user_config_dir(APP_NAME, APP_AUTHOR)) / "settings.json"
+    return Path(user_config_dir(APP_NAME)) / "settings.json"
 
 
 def load_settings() -> dict:
