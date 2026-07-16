@@ -31,14 +31,20 @@ pip install -e .
 ### Why two builds?
 
 `hd2-repatcher.exe` is built by PyInstaller in **windowed** mode: it has no
-console and no stdout/stderr at all, so double-clicking it (or dragging a mod
-folder onto it) never pops up a window beyond its own dialogs.
+console and no stdout/stderr at all, so double-clicking it never pops up a
+window beyond its own dialogs.
+
+> **Caveat:** dragging a mod folder onto the windowed `hd2-repatcher.exe`
+> still processes it CLI-style — but with no console and no dialogs, so it
+> runs (or fails) with zero feedback. Use `hd2-repatcher-cli.exe` for
+> drag-and-drop.
 
 `hd2-repatcher-cli.exe` is built in **console** mode instead. Run from an
 already-open terminal, it just prints to that terminal like any other console
 program. But double-click it (or drag a folder onto it), and since there's no
 terminal for it to attach to, Windows pops up a brand new console window to
-show the result.
+show the result — and the tool waits for a keypress before exiting, so the
+window doesn't vanish before you can read it.
 
 If you don't need CLI usage or drag-and-drop feedback, download the regular
 windowed `hd2-repatcher.exe` so it doesn't pop up a console at you.
@@ -47,10 +53,10 @@ windowed `hd2-repatcher.exe` so it doesn't pop up a console at you.
 
 ### GUI
 
-Double-click `hd2-repatcher.exe`, or run:
+Double-click `hd2-repatcher.exe`, or from a source install run:
 
 ```powershell
-python update_unit_mods.py
+hd2-repatcher
 ```
 
 You'll be prompted to select your Helldivers II `data` folder (once — it's
@@ -64,16 +70,21 @@ hd2-repatcher-cli --game "C:\Program Files (x86)\Steam\steamapps\common\Helldive
 ```
 
 - `-g`/`--game PATH` — path to the Helldivers II `data` folder. Only needs to
-  be passed once; it's cached for future runs.
+  be passed once; it's cached for future runs. Requires at least one
+  `PATCH_FOLDER` in the same invocation.
 - `PATCH_FOLDER [PATCH_FOLDER ...]` — one or more folders containing patch
   files to update.
+
+A source install (`pip install -e .`) puts both `hd2-repatcher` and
+`hd2-repatcher-cli` on your PATH; they're the same program, named to mirror
+the two prebuilt executables.
 
 Once the game data path is cached, you can also just drag and drop one or more
 mod folders directly onto `hd2-repatcher-cli.exe` (or a shortcut to it) —
 Windows passes the dropped folder(s) as arguments, so the tool processes them
 immediately instead of prompting, with a console window showing the result
 (see [Why two builds?](#why-two-builds) for why this only pops up for the CLI
-build).
+build). The window stays open until you press Enter.
 
 Once the game path is cached, you can omit `-g`:
 
@@ -89,7 +100,21 @@ cache — the cache is a convenience for interactive/manual use, and a mod
 manager shouldn't assume a previous run (by itself or another tool) already
 set it.
 
+## Settings
+
+The game data path chosen via the GUI or `-g`/`--game` is cached in
+`%LOCALAPPDATA%\HD2Community\hd2-repatcher\settings.json`. Delete that file to
+reset it, or pass `-g`/`--game` again to overwrite it.
+
 ## Testing
+
+Unit tests live in `tests/` and run in CI on every push and pull request
+(`.github/workflows/test.yml`). To run them locally:
+
+```powershell
+pip install -e ".[test]"
+pytest
+```
 
 There's no automated end-to-end test against real game files (the game data
 isn't available in CI), so changes that touch the patching logic should be

@@ -12,15 +12,18 @@ dependencies = [
 build = ["pyinstaller>=6.10"]
 test = ["pytest>=8"]
 
+# Two names for the same entry point, mirroring the two prebuilt exes: a
+# source install gets both `hd2-repatcher` and `hd2-repatcher-cli`.
 [project.scripts]
-hd2-repatcher = "update_unit_mods:main"
+hd2-repatcher = "cli:main"
+hd2-repatcher-cli = "cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["update_unit_mods", "slim", "settings"]
+py-modules = ["update_unit_mods", "slim", "settings", "cli", "gui"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

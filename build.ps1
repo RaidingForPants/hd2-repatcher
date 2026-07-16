@@ -10,10 +10,10 @@ if (-not (Test-Path .venv)) {
 pip install -e ".[build]" -q
 
 # GUI build: no console window, for double-click use
-pyinstaller --onefile --windowed --name hd2-repatcher --clean --specpath build update_unit_mods.py
+pyinstaller --onefile --windowed --name hd2-repatcher --clean --specpath build cli.py
 
 # CLI build: normal console app, for use from a terminal
-pyinstaller --onefile --name hd2-repatcher-cli --clean --specpath build update_unit_mods.py
+pyinstaller --onefile --name hd2-repatcher-cli --clean --specpath build cli.py
 
 Write-Host "Build complete:"
 Write-Host "  dist\hd2-repatcher.exe      (GUI, double-click)"

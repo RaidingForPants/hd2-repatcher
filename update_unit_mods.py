@@ -1,50 +1,27 @@
-import argparse
 import os
 import struct
-import sys
 import concurrent.futures
+from dataclasses import dataclass, field
 from pathlib import Path
 from slim import slim_init, is_slim_version, load_package, get_package_toc, get_resource_from_bundle, get_resource_from_package
-from settings import get_cached_game_data_path, set_cached_game_data_path
 
 game_resource_mapping = {}
 game_resource_path = ""
-directory = ""
 
 UPDATE_SUCCESS = 0
 NO_UNIT_FILES = 1
 CORRUPTED_FILE = 2
 
+# Marker files that identify a Helldivers II `data` folder: legacy installs
+# contain the `9ba626afa44a3aa3` bundle, "slim" installs contain `bundles.nxa`.
+LEGACY_MARKER_FILE = "9ba626afa44a3aa3"
+SLIM_MARKER_FILE = "bundles.nxa"
+
 def is_valid_game_data_path(path: str) -> bool:
     return os.path.isdir(path) and (
-        os.path.exists(os.path.join(path, "9ba626afa44a3aa3")) or
-        os.path.exists(os.path.join(path, "bundles.nxa"))
+        os.path.exists(os.path.join(path, LEGACY_MARKER_FILE)) or
+        os.path.exists(os.path.join(path, SLIM_MARKER_FILE))
     )
-
-def select_folder():
-    from tkinter import filedialog, messagebox
-    d = filedialog.askdirectory(title="Select folder containing patch files")
-    if d:
-        if not os.path.exists(d):
-            messagebox.showwarning(message="No valid folder selected!")
-            return False
-    else:
-        return None
-    return d
-
-def select_data_folder():
-    from tkinter import filedialog, messagebox
-    d = filedialog.askdirectory(title="Select folder containing game data")
-    if d:
-        if not os.path.exists(d):
-            messagebox.showwarning(message="No valid folder selected!")
-            return False
-        if not is_valid_game_data_path(d):
-            messagebox.showwarning(message="Unable to find Helldivers II game data at this location; make sure you select the `data` folder in your Helldivers II install")
-            return False
-    else:
-        return None
-    return d
 
 class TocHeader:
 
@@ -268,7 +245,14 @@ def load_game_resources():
             if future.result():
                 pass
         executor.shutdown()
-        
+
+def init_game_resources(path: str):
+    '''Point the engine at a game data folder and index its unit resources.'''
+    global game_resource_path
+    game_resource_path = path
+    slim_init(path)
+    load_game_resources()
+
 def update_patch_file(file_path: str):
     file_size = os.path.getsize(file_path)
     total_resources = 0
@@ -388,8 +372,16 @@ def find_patch_files(directory: str):
                 patches.append(os.path.join(root, file))
     return patches
 
-def process_patch_files(patches: list) -> dict:
-    result = {"updated": [], "no_units": [], "corrupted_files": []}
+@dataclass
+class PatchResult:
+    directory: str = ""
+    patches_found: int = 0
+    updated: list = field(default_factory=list)
+    no_units: list = field(default_factory=list)
+    corrupted_files: list = field(default_factory=list)
+
+def process_patch_files(patches: list) -> PatchResult:
+    result = PatchResult(patches_found=len(patches))
     futures = []
     executor = concurrent.futures.ThreadPoolExecutor()
     for patch in patches:
@@ -397,161 +389,15 @@ def process_patch_files(patches: list) -> dict:
     for future in futures:
         code, path = future.result()
         if code == CORRUPTED_FILE:
-            result["corrupted_files"].append(path)
+            result.corrupted_files.append(path)
         elif code == NO_UNIT_FILES:
-            result["no_units"].append(path)
+            result.no_units.append(path)
         else:
-            result["updated"].append(path)
+            result.updated.append(path)
     executor.shutdown()
     return result
 
-def process_patch_folder(directory: str) -> dict:
-    patches = find_patch_files(directory)
-    result = process_patch_files(patches)
-    result["directory"] = directory
-    result["patches_found"] = len(patches)
+def process_patch_folder(directory: str) -> PatchResult:
+    result = process_patch_files(find_patch_files(directory))
+    result.directory = directory
     return result
-
-def update_all_gui(directory: str):
-    from tkinter import messagebox
-    patches = find_patch_files(directory)
-    if len(patches) == 0:
-        messagebox.showwarning(message="No patch files found in folder!")
-        return
-    messagebox.showinfo(message=f"Checking {len(patches)} patch files...")
-    result = process_patch_files(patches)
-    patch_files_updated = len(result["updated"])
-    if len(result["corrupted_files"]) > 0:
-        m = f"Found {len(result['corrupted_files'])} corrupted patch file(s)!"
-        for name in result["corrupted_files"]:
-            m += f"\n{os.path.normpath(name)}"
-        messagebox.showerror(message=m)
-    m = f"Update Complete!\nUpdated {patch_files_updated} patch file(s) that contained unit resources."
-    if len(result["no_units"]) > 0:
-        m += f"\n{len(result['no_units'])} patch file(s) did not contain any unit resources and were skipped."
-    messagebox.showinfo(message=m)
-
-def print_cli_result(directory: str, result: dict):
-    print(f"\n{directory}")
-    if result["patches_found"] == 0:
-        print("  No patch files found.")
-        return
-    print(f"  Checked {result['patches_found']} patch file(s)")
-    print(f"  Updated {len(result['updated'])} patch file(s) containing unit resources")
-    if result["no_units"]:
-        print(f"  Skipped {len(result['no_units'])} patch file(s) with no unit resources")
-    if result["corrupted_files"]:
-        print(f"  Found {len(result['corrupted_files'])} corrupted patch file(s):", file=sys.stderr)
-        for name in result["corrupted_files"]:
-            print(f"    {os.path.normpath(name)}", file=sys.stderr)
-
-def run_cli(game_path, patch_dirs):
-    global game_resource_path
-    if game_path is None:
-        cached = get_cached_game_data_path()
-        if cached and is_valid_game_data_path(cached):
-            game_path = cached
-        else:
-            print("error: no game data directory configured; pass -g/--game <path>", file=sys.stderr)
-            sys.exit(1)
-
-    game_resource_path = game_path
-    print(f"Loading game resources from: {game_resource_path}")
-    slim_init(game_resource_path)
-    load_game_resources()
-
-    exit_code = 0
-    for patch_dir in patch_dirs:
-        patch_dir = os.path.abspath(patch_dir)
-        if not os.path.isdir(patch_dir):
-            print(f"error: '{patch_dir}' is not a directory", file=sys.stderr)
-            exit_code = 1
-            continue
-        result = process_patch_folder(patch_dir)
-        print_cli_result(patch_dir, result)
-        if result["corrupted_files"]:
-            exit_code = 1
-    sys.exit(exit_code)
-
-def run_gui():
-    global game_resource_path, directory
-    import tkinter as tk
-    from tkinter import messagebox
-
-    root = tk.Tk()
-    root.withdraw()
-
-    print("fixing unit mods...")
-
-    cached = get_cached_game_data_path()
-    if cached and is_valid_game_data_path(cached):
-        game_resource_path = cached
-
-    while True:
-
-        if not game_resource_path:
-            game_resource_path = select_data_folder()
-            print(game_resource_path)
-            if game_resource_path == False: continue
-            if game_resource_path is None:
-                do_exit = messagebox.askyesnocancel(message="Would you like to quit?")
-                if do_exit:
-                    sys.exit()
-                else:
-                    continue
-            set_cached_game_data_path(os.path.abspath(game_resource_path))
-            slim_init(game_resource_path)
-            load_game_resources()
-
-        directory = select_folder()
-        if directory == False: continue
-        if directory is None:
-            do_exit = messagebox.askyesnocancel(message="Would you like to quit?")
-            if do_exit:
-                sys.exit()
-            else:
-                continue
-        update_all_gui(directory)
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Update unit resources in Helldivers II patch files.")
-    parser.add_argument("-g", "--game", metavar="PATH",
-                         help="path to the Helldivers II game data folder; also cached for future runs")
-    parser.add_argument("patches", nargs="*", metavar="PATCH_FOLDER",
-                         help="folder(s) containing patch files to update")
-    return parser.parse_args()
-
-def setup_console_io():
-    '''
-    The windowed build has no console, so sys.stdout/stderr are None; guard
-    stray print() calls from crashing it. The console build already has real
-    stdio and this is a no-op there.
-    '''
-    if sys.stdout is None:
-        sys.stdout = open(os.devnull, "w")
-    if sys.stderr is None:
-        sys.stderr = open(os.devnull, "w")
-
-def main():
-    setup_console_io()
-    args = parse_args()
-
-    game_path = None
-    if args.game:
-        game_path = os.path.abspath(args.game)
-        if not is_valid_game_data_path(game_path):
-            print(f"error: '{args.game}' does not look like a Helldivers II data folder "
-                  f"(expected to find `9ba626afa44a3aa3` or `bundles.nxa` inside it)", file=sys.stderr)
-            sys.exit(1)
-        set_cached_game_data_path(game_path)
-        print(f"Game data directory set to: {game_path}")
-
-    if args.patches:
-        run_cli(game_path, args.patches)
-    elif args.game:
-        return
-    else:
-        run_gui()
-
-if __name__ == "__main__":
-    main()
