@@ -106,6 +106,16 @@ class TestParseArgs:
         assert exc.value.code == 2
         assert "PATCH_FOLDER" in capsys.readouterr().err
 
+    def test_no_game_path_caching_defaults_to_false(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["prog"])
+        args = cli.parse_args()
+        assert args.no_game_path_caching is False
+
+    def test_parses_no_game_path_caching_flag(self, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["prog", "-g", "C:\\game", "--no-game-path-caching", "dir1"])
+        args = cli.parse_args()
+        assert args.no_game_path_caching is True
+
 
 class TestSetupConsoleIo:
     def test_replaces_none_stdout_and_stderr(self, monkeypatch):
@@ -170,3 +180,15 @@ class TestMain:
 
         assert exc.value.code == 1
         assert "does not look like a Helldivers II data folder" in capsys.readouterr().err
+
+    def test_no_game_path_caching_skips_saving_path(self, monkeypatch, tmp_path):
+        (tmp_path / "bundles.nxa").touch()
+        monkeypatch.setattr(sys, "argv", ["prog", "-g", str(tmp_path), "--no-game-path-caching", str(tmp_path)])
+        called = {}
+        monkeypatch.setattr(cli, "set_cached_game_data_path", lambda p: called.setdefault("cached", p))
+        monkeypatch.setattr(cli, "run_cli", lambda g, p: called.setdefault("run_cli", (g, p)))
+
+        cli.main()
+
+        assert "cached" not in called
+        assert called["run_cli"] == (str(tmp_path), [str(tmp_path)])

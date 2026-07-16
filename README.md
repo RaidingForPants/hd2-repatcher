@@ -72,6 +72,8 @@ hd2-repatcher-cli --game "C:\Program Files (x86)\Steam\steamapps\common\Helldive
 - `-g`/`--game PATH` — path to the Helldivers II `data` folder. Only needs to
   be passed once; it's cached for future runs. Requires at least one
   `PATCH_FOLDER` in the same invocation.
+- `--no-game-path-caching` — don't save or overwrite the cached game data
+  path when `-g`/`--game` is given.
 - `PATCH_FOLDER [PATCH_FOLDER ...]` — one or more folders containing patch
   files to update.
 

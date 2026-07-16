@@ -81,6 +81,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Update unit resources in Helldivers II patch files.")
     parser.add_argument("-g", "--game", metavar="PATH",
                          help="path to the Helldivers II game data folder; also cached for future runs")
+    parser.add_argument("--no-game-path-caching", action="store_true",
+                         help="do not save or overwrite the cached game data path")
     parser.add_argument("patches", nargs="*", metavar="PATCH_FOLDER",
                          help="folder(s) containing patch files to update")
     args = parser.parse_args()
@@ -110,7 +112,8 @@ def main():
             print(f"error: '{args.game}' does not look like a Helldivers II data folder "
                   f"(expected to find `{LEGACY_MARKER_FILE}` or `{SLIM_MARKER_FILE}` inside it)", file=sys.stderr)
             exit_cli(1)
-        set_cached_game_data_path(game_path)
+        if not args.no_game_path_caching:
+            set_cached_game_data_path(game_path)
         print(f"Game data directory set to: {game_path}")
 
     if args.patches:
