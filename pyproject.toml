@@ -10,6 +10,7 @@ dependencies = [
 
 [project.optional-dependencies]
 build = ["pyinstaller>=6.10"]
+test = ["pytest>=8"]
 
 [project.scripts]
 hd2-repatcher = "update_unit_mods:main"
@@ -20,3 +21,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = ["update_unit_mods", "slim", "settings"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
