@@ -9,24 +9,30 @@ resources in place using the current game data.
 
 ## Requirements
 
-- Windows (reads the Helldivers II install directly; uses `tkinter` for the GUI)
-- Python 3.10+ (only if running from source — see below)
 - A Helldivers II install (specifically its `data` folder)
+- Windows: no extra requirements — use the prebuilt executable below
+- Linux/macOS: no prebuilt executable is provided, so run from source with
+  Python 3.10+ (see below)
 
 ## Installation
 
-### Option 1: Prebuilt executable
+### Option 1: Prebuilt executable (Windows)
 
 Download `hd2-repatcher.exe` (GUI, no console) or `hd2-repatcher-cli.exe`
 (console/CLI) from the [Releases](../../releases) page. No Python required.
+These are built by CI (`.github/workflows/release.yml`) on `windows-latest`.
 
-### Option 2: Run from source
+### Option 2: Run from source (Windows, Linux, macOS)
+
+Clone the repo, then:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
 ```
+
+(On Linux/macOS, activate with `source .venv/bin/activate` instead.)
 
 ### Why two builds?
 
