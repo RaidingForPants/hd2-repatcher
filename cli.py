@@ -2,6 +2,9 @@ import argparse
 import os
 import sys
 
+if os.name == "nt":
+    import ctypes
+
 from settings import get_cached_game_data_path, set_cached_game_data_path
 from update_unit_mods import (
     LEGACY_MARKER_FILE,
@@ -26,21 +29,45 @@ def print_cli_result(directory: str, result: PatchResult):
         for name in result.corrupted_files:
             print(f"    {os.path.normpath(name)}", file=sys.stderr)
 
+def _process_image_path(pid):
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        buf = ctypes.create_unicode_buffer(260)
+        size = ctypes.c_uint32(260)
+        if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return buf.value
+        return None
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
 def pause_if_owns_console():
     '''
     When the console build is launched by double-click or drag-and-drop,
     Windows spawns a fresh console that closes the instant this process
-    exits, taking the output with it. If this process is the console's only
-    occupant, hold the window open so the result can be read. Run from an
-    existing terminal (or in the windowed build, which has no console at
-    all), this is a no-op.
+    exits, taking the output with it. If every other process attached to
+    the console is either us or (for the --onefile build) the bootloader
+    process that re-executed itself as us, hold the window open so the
+    result can be read. If a real shell is attached (run from an existing
+    terminal), or in the windowed build (which has no console at all),
+    this is a no-op.
     '''
     if os.name != "nt":
         return
-    import ctypes
-    process_ids = (ctypes.c_uint32 * 2)()
-    if ctypes.windll.kernel32.GetConsoleProcessList(process_ids, 2) != 1:
+    process_ids = (ctypes.c_uint32 * 8)()
+    count = ctypes.windll.kernel32.GetConsoleProcessList(process_ids, 8)
+    if count == 0 or count > 8:
         return
+    our_pid = os.getpid()
+    our_path = os.path.normcase(sys.executable)
+    for pid in process_ids[:count]:
+        if pid == our_pid:
+            continue
+        image_path = _process_image_path(pid)
+        if image_path is None or os.path.normcase(image_path) != our_path:
+            return
     if sys.stdin is None or not sys.stdin.isatty():
         return
     try:
