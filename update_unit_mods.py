@@ -1,48 +1,27 @@
 import os
 import struct
-import sys
 import concurrent.futures
-import tkinter as tk
-from tkinter import filedialog
-from tkinter import messagebox
+from dataclasses import dataclass, field
 from pathlib import Path
 from slim import slim_init, is_slim_version, load_package, get_package_toc, get_resource_from_bundle, get_resource_from_package
 
 game_resource_mapping = {}
 game_resource_path = ""
-directory = ""
-
-root = tk.Tk()
-root.withdraw()
 
 UPDATE_SUCCESS = 0
 NO_UNIT_FILES = 1
 CORRUPTED_FILE = 2
 
-print("fixing unit mods...")
+# Marker files that identify a Helldivers II `data` folder: legacy installs
+# contain the `9ba626afa44a3aa3` bundle, "slim" installs contain `bundles.nxa`.
+LEGACY_MARKER_FILE = "9ba626afa44a3aa3"
+SLIM_MARKER_FILE = "bundles.nxa"
 
-def select_folder():
-    d = filedialog.askdirectory(title="Select folder containing patch files")
-    if d:
-        if not os.path.exists(d):
-            messagebox.showwarning(message="No valid folder selected!")
-            return False
-    else:
-        return None
-    return d
-    
-def select_data_folder():
-    d = filedialog.askdirectory(title="Select folder containing game data")
-    if d:
-        if not os.path.exists(d):
-            messagebox.showwarning(message="No valid folder selected!")
-            return False
-        if not os.path.exists(os.path.join(d, "9ba626afa44a3aa3")) and not os.path.exists(os.path.join(d, "bundles.nxa")):
-            messagebox.showwarning(message="Unable to find Helldivers II game data at this location; make sure you select the `data` folder in your Helldivers II install")
-            return False
-    else:
-        return None
-    return d
+def is_valid_game_data_path(path: str) -> bool:
+    return os.path.isdir(path) and (
+        os.path.exists(os.path.join(path, LEGACY_MARKER_FILE)) or
+        os.path.exists(os.path.join(path, SLIM_MARKER_FILE))
+    )
 
 class TocHeader:
 
@@ -266,7 +245,14 @@ def load_game_resources():
             if future.result():
                 pass
         executor.shutdown()
-        
+
+def init_game_resources(path: str):
+    '''Point the engine at a game data folder and index its unit resources.'''
+    global game_resource_path
+    game_resource_path = path
+    slim_init(path)
+    load_game_resources()
+
 def update_patch_file(file_path: str):
     file_size = os.path.getsize(file_path)
     total_resources = 0
@@ -378,62 +364,40 @@ def update_patch_file(file_path: str):
     tocFile.close()
     return (UPDATE_SUCCESS, file_path)
     
-def update_all():
-    futures = []
-    executor = concurrent.futures.ThreadPoolExecutor()
+def find_patch_files(directory: str):
     patches = []
-    no_units = []
-    corrupted_files = []
     for root, dirs, files in os.walk(directory):
         for file in files:
             if "patch" in os.path.splitext(file)[1]:
                 patches.append(os.path.join(root, file))
-    if len(patches) == 0:
-        messagebox.showwarning(message="No patch files found in folder!")
-        return
-    else:
-        messagebox.showinfo(message=f"Checking {len(patches)} patch files...")
+    return patches
+
+@dataclass
+class PatchResult:
+    directory: str = ""
+    patches_found: int = 0
+    updated: list = field(default_factory=list)
+    no_units: list = field(default_factory=list)
+    corrupted_files: list = field(default_factory=list)
+
+def process_patch_files(patches: list) -> PatchResult:
+    result = PatchResult(patches_found=len(patches))
+    futures = []
+    executor = concurrent.futures.ThreadPoolExecutor()
     for patch in patches:
         futures.append(executor.submit(update_patch_file, patch))
-    for index, future in enumerate(futures):
-        result = future.result()
-        if result[0] == CORRUPTED_FILE:
-            corrupted_files.append(result[1])
-        if result[0] == NO_UNIT_FILES:
-            no_units.append(result[1])
-    executor.shutdown()
-    patch_files_updated = len(patches) - len(no_units) - len(corrupted_files)
-    if len(corrupted_files) > 0:
-        m = f"Found {len(corrupted_files)} corrupted patch file(s)!"
-        for name in corrupted_files:
-            m += f"\n{os.path.normpath(name)}"
-        messagebox.showerror(message=m)
-    m = f"Update Complete!\nUpdated {patch_files_updated} patch file(s) that contained unit resources."
-    if len(no_units) > 0:
-        m += f"\n{len(no_units)} patch file(s) did not contain any unit resources and were skipped."
-    messagebox.showinfo(message=m)
-    
-while True:
-    
-    if not game_resource_path:
-        game_resource_path = select_data_folder()
-        print(game_resource_path)
-        if game_resource_path == False: continue
-        if game_resource_path is None:
-            do_exit = messagebox.askyesnocancel(message="Would you like to quit?")
-            if do_exit:
-                sys.exit()
-            else:
-                continue
-        slim_init(game_resource_path)
-        load_game_resources()
-    
-    directory = select_folder()
-    if directory == False: continue
-    if directory is None:
-        do_exit = messagebox.askyesnocancel(message="Would you like to quit?")
-        if do_exit:
-            sys.exit()
+    for future in futures:
+        code, path = future.result()
+        if code == CORRUPTED_FILE:
+            result.corrupted_files.append(path)
+        elif code == NO_UNIT_FILES:
+            result.no_units.append(path)
         else:
-            continue
-    update_all()
+            result.updated.append(path)
+    executor.shutdown()
+    return result
+
+def process_patch_folder(directory: str) -> PatchResult:
+    result = process_patch_files(find_patch_files(directory))
+    result.directory = directory
+    return result
